@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sliding Puzzle Game</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        .game-container {
+            text-align: center;
+            margin: 20px;
+        }
+
+        .status-container {
+            margin: 10px 0;
+        }
+
+        .puzzle-container {
+            display: grid;
+            gap: 5px;
+            margin: 20px auto;
+            max-width: 400px;
+        }
+
+        .tile {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 1px solid #ccc;
+            font-size: 1.5rem;
+            font-weight: bold;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        .empty-tile {
+            background-color: white;
+            color: black;
+            cursor: pointer;
+        }
+
+        .filled-tile {
+            background-color: #f0f0f0;
+            color: black;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px;
+            cursor: pointer;
+        }
+
+        #upload-form {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        /* Popup styling */
+        .popup {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.4);
+            padding-top: 60px;
+        }
+
+        .popup-content {
+            background-color: #fff;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-height: 80%;
+            overflow-y: auto; /* Adding scroll if content overflows */
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        body{
+            display: block;
+        }
+
+        #upload-form{
+            margin: 30px auto;
+            max-width: 600px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
+        }  
+        
+        #back-btn{
+            background-color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>Sliding Puzzle Game</h1>
+            <label for="size-selector">Pilih Ukuran Grid:</label>
+        <select id="size-selector">
+            <option value="3">3x3</option>
+            <option value="4">4x4</option>
+            <option value="5">5x5</option>
+        </select>
+        <div style="display: flex; justify-content: center;">
+        <button id="reshuffle-btn">Reshuffle</button>
+        <form action="/">
+            <button id="back-btn" type="submit" >Kembali</button>
+        </form>
+        </div>
+        <div class="status-container">
+            <p>Waktu: <span id="time-display">00:00</span></p>
+            <p>Langkah: <span id="steps-display">0</span></p>
+        </div>
+        <div id="puzzle-container" class="puzzle-container"></div>
+    </div>
+
+    <!-- Pop-up untuk solusi puzzle -->
+    <!-- <div id="solutionPopup" class="popup">
+        <div class="popup-content">
+            <span class="close" id="closePopup">&times;</span>
+            <h4>Solusi Puzzle</h4>
+            <div id="solutionSteps"></div>
+        </div>
+    </div> -->
+
+    <form id="upload-form" method="POST" action="/solve_puzzle" enctype="multipart/form-data" target="_blank">
+        <input type="file" name="puzzle_image" accept="image/*" required>
+        <button type="submit">Solusi Puzzle</button>
+    </form>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const sizeSelector = document.getElementById("size-selector");
+            const puzzleContainer = document.getElementById("puzzle-container");
+            const generateButton = document.getElementById('generate-button');
+            const timeDisplay = document.getElementById("time-display");
+            const stepsDisplay = document.getElementById("steps-display");
+            let gridData = [];
+            let gridSize = 3;
+            let stepCount = 0;
+            let startTime;
+            let timerInterval;
+            let isTimerStarted = false;
+
+            sizeSelector.addEventListener('change', () => {
+                const selectedSize = sizeSelector.value;
+                loadPuzzle(selectedSize);
+            });
+            // Fungsi untuk memulai timer
+            function startTimer() {
+                startTime = Date.now();
+                timerInterval = setInterval(() => {
+                    const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+                    const minutes = String(Math.floor(elapsedTime / 60)).padStart(2, '0');
+                    const seconds = String(elapsedTime % 60).padStart(2, '0');
+                    timeDisplay.textContent = `${minutes}:${seconds}`;
+                }, 1000);
+            }
+
+            // Fungsi untuk mereset game
+            function resetGame() {
+                clearInterval(timerInterval);
+                timeDisplay.textContent = "00:00";
+                stepsDisplay.textContent = "0";
+                stepCount = 0;
+                isTimerStarted = false;
+            }
+
+            // Fungsi untuk memuat puzzle
+            function loadPuzzle(size) {
+                fetch('/get_puzzle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ size: size })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    gridData = data.grid;
+                    gridSize = data.size;
+                    renderPuzzle(gridData);
+                    resetGame();
+                });
+            }
+
+            // Fungsi untuk merender puzzle
+            function renderPuzzle(grid) {
+                puzzleContainer.innerHTML = '';
+                puzzleContainer.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
+                grid.forEach((row, i) => {
+                    row.forEach((tile, j) => {
+                        const tileDiv = document.createElement('div');
+                        tileDiv.classList.add('tile');
+                        if (tile !== null && tile !== 0) {
+                            tileDiv.textContent = tile;
+                            tileDiv.classList.add('filled-tile');
+                            tileDiv.addEventListener('click', () => moveTile(i, j));
+                        } else {
+                            tileDiv.textContent = 0;
+                            tileDiv.classList.add('empty-tile');
+                            tileDiv.addEventListener('click', () => moveTile(i, j));
+                        }
+                        puzzleContainer.appendChild(tileDiv);
+                    });
+                });
+            }
+
+            // Fungsi untuk memindahkan tile
+            function moveTile(row, col) {
+                const neighbors = [
+                    { row: row - 1, col: col },
+                    { row: row + 1, col: col },
+                    { row: row, col: col - 1 },
+                    { row: row, col: col + 1 }
+                ];
+
+                for (let { row: nRow, col: nCol } of neighbors) {
+                    if (
+                        nRow >= 0 && nRow < gridSize &&
+                        nCol >= 0 && nCol < gridSize &&
+                        (gridData[nRow][nCol] === null || gridData[nRow][nCol] === 0)
+                    ) {
+                        gridData[nRow][nCol] = gridData[row][col];
+                        gridData[row][col] = 0;
+                        renderPuzzle(gridData);
+
+                        if (!isTimerStarted) {
+                            startTimer();
+                            isTimerStarted = true;
+                        }
+
+                        stepCount++;
+                        stepsDisplay.textContent = stepCount;
+                        checkWin();
+                        break;
+                    }
+                }
+            }
+
+            // Fungsi untuk mengecek apakah puzzle selesai
+            function checkWin() {
+                const flatGrid = gridData.flat();
+                const correctOrder = [...Array(gridSize * gridSize - 1).keys()].map(i => i + 1).concat([0]);
+                if (JSON.stringify(flatGrid) === JSON.stringify(correctOrder)) {
+                    clearInterval(timerInterval);
+                    showSolution(["Step 1", "Step 2", "Step 3"]);  // Example solution steps
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Selamat!',
+                        text: `Puzzle berhasil diselesaikan dalam ${timeDisplay.textContent} dengan ${stepCount} langkah!`,
+                        confirmButtonText: 'Tutup'
+                    });
+                }
+            }
+
+            // Fungsi untuk mereshuffle puzzle
+            function reshufflePuzzle() {
+                for (let i = gridSize * gridSize - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    const xi = Math.floor(i / gridSize), yi = i % gridSize;
+                    const xj = Math.floor(j / gridSize), yj = j % gridSize;
+                    [gridData[xi][yi], gridData[xj][yj]] = [gridData[xj][yj], gridData[xi][yi]];
+                }
+                renderPuzzle(gridData);
+                resetGame();
+            }
+
+            // Event listener untuk tombol reshuffle
+            document.getElementById("reshuffle-btn").addEventListener("click", reshufflePuzzle);
+
+            // Fungsi untuk menampilkan solusi dalam pop-up
+            // function showSolution(solution) {
+            //     const solutionSteps = document.getElementById("solutionSteps");
+            //     solutionSteps.innerHTML = solution.join("<br>");
+            //     document.getElementById("solutionPopup").style.display = "block";
+            // }
+
+            // Menangani tutup pop-up
+            // document.getElementById("closePopup").addEventListener("click", () => {
+            //     document.getElementById("solutionPopup").style.display = "none";
+            // });
+
+            // Inisialisasi puzzle pertama
+            loadPuzzle(gridSize);
+        });
+    </script>
+</body>
+</html>
+<style>
+body {
+    margin: 0;
+    font-family: 'Poppins', sans-serif;
+    background: linear-gradient(to right, #ffffff, #fcf7f7);
+    color: #000;
+    text-align: center;
+}
+
+h1 {
+    margin-top: 20px;
+    font-size: 2.5rem;
+    font-weight: 600;
+}
+
+.game-container {
+    margin: 30px auto;
+    max-width: 600px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 15px;
+    padding: 20px;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.status-container {
+    margin: 15px 0;
+    font-size: 1.2rem;
+}
+
+.puzzle-container {
+    display: grid;
+    gap: 5px;
+    margin: 20px auto;
+    max-width: 400px;
+    transition: all 0.3s ease-in-out;
+}
+
+.tile {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.5rem;
+    font-weight: bold;
+    user-select: none;
+    cursor: pointer;
+    border-radius: 10px;
+    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.tile:hover {
+    transform: scale(1.05);
+}
+
+.empty-tile {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: #444242;
+}
+
+.filled-tile {
+    background-color: #fff;
+    color: #333;
+}
+
+button {
+    margin: 10px;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    background: #2575fc;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.2);
+    transition: background 0.3s ease, transform 0.2s ease;
+}
+
+button:hover {
+    background: #6a11cb;
+    transform: translateY(-3px);
+}
+
+#upload-form input[type="file"] {
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+/* Pop-up Styling */
+.popup {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.popup-content {
+    background: #fff;
+    margin: 10% auto;
+    padding: 20px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 600px;
+    color: #333;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.close {
+    float: right;
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #aaa;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: #000;
+}
+</style>
